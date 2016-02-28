@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument('--seq', type=str, required=True, help='fasta file for insertion sequence looking for in reference')
     # Parameters for hits
     parser.add_argument('--gap', type=int, required=False, default=0, help='distance between regions to call overlapping')
+    parser.add_argument('--drop', type=int, required=False, default=0, help='drop posotion with only n isolates or less')
     parser.add_argument('--cds', nargs='+', type=str, required=False, default=['locus_tag', 'gene', 'product'], help='qualifiers to look for in reference genbank for CDS features')
     parser.add_argument('--trna', nargs='+', type=str, required=False, default=['locus_tag', 'product'], help='qualifiers to look for in reference genbank for tRNA features')
     parser.add_argument('--rrna', nargs='+', type=str, required=False, default=['locus_tag', 'product'], help='qualifiers to look for in reference genbank for rRNA features')
@@ -554,7 +555,10 @@ def main():
 
     elapsed_time = time.time() - start_time
     print 'Time taken: ' + str(elapsed_time)
-    
+
+    list_of_positions = [p for p in list_of_positions if len(p.isolate_dict) > args.drop]
+    print 'Positions: ' + str(len(list_of_positions))
+
     # Get the flanking genes for each position now they've all been merged
     print 'Getting flanking genes for each position (this step is the longest and could take some time) ...'
     # key = (start, end), valye = [left_gene, right_gene]
