@@ -15,11 +15,12 @@ from collections import OrderedDict
 import time
 
 class Position(object):
-    def __init__(self, x, y, orientation, isolate_dict, left_feature, right_feature):
+    def __init__(self, x, y, orientation, isolate_dict, call, left_feature, right_feature):
         self.x = x
         self.y = y
         self.orientation = orientation
         self.isolate_dict = isolate_dict
+        self.call = call
         self.left_feature = left_feature
         self.right_feature = right_feature
     def __eq__(self, other):
@@ -34,7 +35,10 @@ def parse_args():
     parser.add_argument('--seq', type=str, required=True, help='fasta file for insertion sequence looking for in reference')
     # Parameters for hits
     parser.add_argument('--gap', type=int, required=False, default=0, help='distance between regions to call overlapping')
+    parser.add_argument('--tolerance', type=int, required=False, default=-1, help='distance between regions to call overlapping(alternative mergong method)')
     parser.add_argument('--drop', type=int, required=False, default=0, help='drop posotion with only n isolates or less')
+
+
     parser.add_argument('--cds', nargs='+', type=str, required=False, default=['locus_tag', 'gene', 'product'], help='qualifiers to look for in reference genbank for CDS features')
     parser.add_argument('--trna', nargs='+', type=str, required=False, default=['locus_tag', 'product'], help='qualifiers to look for in reference genbank for tRNA features')
     parser.add_argument('--rrna', nargs='+', type=str, required=False, default=['locus_tag', 'product'], help='qualifiers to look for in reference genbank for rRNA features')
@@ -43,7 +47,59 @@ def parse_args():
 
     return parser.parse_args()
 
-def check_ranges(positions, range_to_check, gap, orientation):
+def check_ranges_tol(positions, range_to_check, tolerance, orientation, call, isolate):
+    '''
+    Alternative method for merging hits:
+    requires intersection of ranges or
+    both ends of new hit to be places within tolerance b.p. from
+    any existing hit to be merged
+    '''
+
+    known = "Known" in call
+
+    found = None
+
+    #find if range_to_check overlaps with any known interval with maximal intersection
+    #merging Novel and known hits doesn't make sense
+    #merging positions from same isolate also doesn't make sense
+    max_intersection = 0
+    for pos in positions:
+        if orientation == pos.orientation and \
+        known == ("Known" in pos.call) and \
+        max(pos.x, range_to_check[0]) < min (pos.y, range_to_check[1]) and \
+        isolate not in pos.isolate_dict.keys():
+            if min (pos.y, range_to_check[1]) - max(pos.x, range_to_check[0]) > max_intersection:
+                found =  pos
+                max_intersection = min (pos.y, range_to_check[1]) - max(pos.x, range_to_check[0])
+            #print "Merge: ", (found.x, found.y), range_to_check
+
+    if found is None:
+        #try to find nearest range so x and y of the ranges within tolerance
+        nearest = 2*tolerance
+        for pos in positions:
+            if orientation == pos.orientation and \
+            known == ("Known" in pos.call) and \
+            abs(range_to_check[0] - pos.x) < tolerance and \
+            abs(range_to_check[1] - pos.y) < tolerance and \
+            isolate not in pos.isolate_dict.keys():
+                current =  (abs(range_to_check[0] - pos.x) +
+                            abs(range_to_check[1] - pos.y))/2.
+                if current < nearest:
+                    found = pos
+                    nearest = current
+
+    if found is not None:
+        num_of_olds = len(found.isolate_dict)
+        #new_range_x = int(round((found.x * num_of_olds + range_to_check[0])/(num_of_olds+1.0)))
+        #new_range_y = int(round((found.y * num_of_olds + range_to_check[1])/(num_of_olds+1.0)))
+        new_range_x = min(found.x, range_to_check[0])
+        new_range_y = max(found.y, range_to_check[1])
+        return found, (new_range_x, new_range_y)
+
+    else:
+        return False, False
+
+def check_ranges(positions, range_to_check, gap, orientation, call, isolate):
     '''
     Takes a list of tuples with currently known ranges, and a new range
     to check against these to see if it overlaps.
@@ -190,7 +246,7 @@ def get_ref_positions(reference, is_query, positions_list):
                 else:
                     orientation = 'F'
                 pos_dict = {ref_name: '+'}
-                new_pos = Position(min(x, y), max(x, y), orientation, pos_dict, None, None)
+                new_pos = Position(min(x, y), max(x, y), orientation, pos_dict, "Known", None, None)
                 #positions_dict[(min(x, y), max(x, y))][ref_name] = '+'
                 # Get orientation of known site for merging purposes
                 #if x > y:
@@ -519,12 +575,15 @@ def main():
                                 isolate_dict[isolate] = '*'
                             else:
                                 isolate_dict[isolate] = '+'
-                            new_pos = Position(is_start, is_end, orientation, isolate_dict, None, None)
+                            new_pos = Position(is_start, is_end, orientation, isolate_dict, call, None, None)
                             list_of_positions.append(new_pos)
-                        
+
                         # If the list of positions isn't empty, then there are ranges to check against
                         else:
-                            old_position, new_range = check_ranges(list_of_positions, (is_start, is_end), args.gap, orientation)
+                            if args.tolerance == -1:
+                                old_position, new_range = check_ranges(list_of_positions, (is_start, is_end), args.gap, orientation, call, isolate)
+                            else:
+                                old_position, new_range = check_ranges_tol(list_of_positions, (is_start, is_end), args.tolerance, orientation, call, isolate)
                             # So the current range overlaps with a range we already have
                             if old_position != False:
                                 isolate_dict = old_position.isolate_dict
@@ -540,7 +599,7 @@ def main():
                                 # Remove the old position from the list
                                 list_of_positions.remove(old_position)
                                 # Create the new position and add it
-                                new_pos = Position(new_range[0], new_range[1], orientation, isolate_dict, None, None)
+                                new_pos = Position(new_range[0], new_range[1], orientation, isolate_dict, call, None, None)
                                 list_of_positions.append(new_pos)
                             # Otherwise this range hasn't been seen before, so all values are False
                             else:
@@ -550,7 +609,7 @@ def main():
                                     isolate_dict[isolate] = '*'
                                 else:
                                     isolate_dict[isolate] = '+'
-                                new_pos = Position(is_start, is_end, orientation, isolate_dict, None, None)
+                                new_pos = Position(is_start, is_end, orientation, isolate_dict, call, None, None)
                                 list_of_positions.append(new_pos)
 
     elapsed_time = time.time() - start_time
