@@ -67,6 +67,7 @@ def check_ranges_tol(positions, range_to_check, tolerance, orientation, call, is
     both ends of new hit to be places within tolerance b.p. from
     any existing hit to be merged
     '''
+    INTERSECT = 0.8
 
     known = "Known" in call
 
@@ -75,11 +76,16 @@ def check_ranges_tol(positions, range_to_check, tolerance, orientation, call, is
     #find if range_to_check overlaps with any known interval with maximal intersection
     #merging Novel and known hits doesn't make sense
     #merging positions from same isolate also doesn't make sense
+    #intersection condition for (A,B), (X,Y): NOT (B <= X OR Y <= A) <==> X < B AND A < Y
+    #<==> max(pos.x, range_to_check[0]) < min (pos.y, range_to_check[1]) and \
+    #range_to_check[0] < pos.y and pos.x < range_to_check[1] and \
     max_intersection = 0
     for pos in positions:
+        avg_len = (1 + pos.y - pos.x + range_to_check[1] - range_to_check[0]) / 2.0 #1 is pseudocount
+        int_len = 1 + min(pos.y, range_to_check[1]) - max(pos.x, range_to_check[0])
         if orientation == pos.orientation and \
         known == ("Known" in pos.call) and \
-        max(pos.x, range_to_check[0]) < min (pos.y, range_to_check[1]) and \
+        int_len/avg_len > INTERSECT and \
         isolate not in pos.isolate_dict.keys():
             if min (pos.y, range_to_check[1]) - max(pos.x, range_to_check[0]) > max_intersection:
                 found =  pos
