@@ -15,7 +15,7 @@ from collections import OrderedDict
 import time
 
 class Position(object):
-    def __init__(self, x, y, orientation, isolate_dict, call, left_feature, right_feature):
+    def __init__(self, x, y, orientation, isolate_dict, call, left_feature, right_feature, oldxs = None, oldys = None, exactx = None, exacty = None):
         self.x = x
         self.y = y
         self.orientation = orientation
@@ -23,6 +23,19 @@ class Position(object):
         self.call = call
         self.left_feature = left_feature
         self.right_feature = right_feature
+
+        if oldxs is not None:
+            self.xs = oldxs
+            self.xs.append(exactx)
+        else:
+            self.xs = [x]
+
+        if oldys is not None:
+            self.ys = oldys
+            self.ys.append(exacty)
+        else:
+            self.ys = [y]
+
     def __eq__(self, other):
         return self.__dict__ == other.__dict__
 
@@ -599,7 +612,8 @@ def main():
                                 # Remove the old position from the list
                                 list_of_positions.remove(old_position)
                                 # Create the new position and add it
-                                new_pos = Position(new_range[0], new_range[1], orientation, isolate_dict, call, None, None)
+                                new_pos = Position(new_range[0], new_range[1], orientation, isolate_dict, call, None, None,
+                                                   old_position.xs, old_position.ys, is_start, is_end)
                                 list_of_positions.append(new_pos)
                             # Otherwise this range hasn't been seen before, so all values are False
                             else:
@@ -617,6 +631,22 @@ def main():
 
     list_of_positions = [p for p in list_of_positions if len(p.isolate_dict) > args.drop]
     print 'Positions: ' + str(len(list_of_positions))
+
+    #Check if all hits in every position within tolerance
+    num_bad_positions = 0
+    if args.tolerance > 0 or args.gap > 0:
+        max_delta = 2*(args.tolerance if args.tolerance > 0 else args.gap)
+        for p in list_of_positions:
+            bad = False
+            if max(p.xs) - min(p.xs) > max_delta:
+                print "Inconsistensy x position in ", (p.x, p.y), " len ", len(p.xs), " delta ", max(p.xs) - min(p.xs)
+                bad = True
+            if max(p.ys) - min(p.ys) > max_delta:
+                print "Inconsistensy y position in ", (p.x, p.y), " len ", len(p.xs), " delta ", max(p.ys) - min(p.ys)
+                bad = True
+            num_bad_positions += bad
+
+        print "Total bad positions ", num_bad_positions
 
     # Get the flanking genes for each position now they've all been merged
     print 'Getting flanking genes for each position (this step is the longest and could take some time) ...'
